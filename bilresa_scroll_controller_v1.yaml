@@ -1,5 +1,6 @@
 blueprint:
-  name: Bilrea Scroll Controller V1
+  name: Bilrea Scroll Controller V1.1
+  domain: automation
   author: whag
   description: >
     Control Lights, Volume, or Climate using the Bilrea/Tuya Smart Knob.
@@ -12,7 +13,7 @@ blueprint:
     - Smart Limit Logic: NULL = Up, 1 = Down.
     - Media player: TV Volume Up/Down commands.
     - Instant Click: Interruptible scroll loop.
-  domain: automation
+
   input:
     mqtt_topic:
       name: MQTT Topic
@@ -43,7 +44,7 @@ blueprint:
 
     step_size:
       name: Scroll Sensitivity
-      description: "Change amount per click. Rec: 10 (Lights), 1 (Climate)."
+      description: "Change amount per click. Rec: 10 (Lights), 5 (Volume)."
       default: 10
       selector:
         number: {min: 0.1, max: 100, step: 0.1}
@@ -93,7 +94,7 @@ variables:
 
 action:
   - choose:
-      # 1. INITIAL BUTTON CLICK
+      #INITIAL BUTTON CLICK
       - conditions: "{{ trigger.payload_json.action == 'on' }}"
         sequence: !input action_single_on
       - conditions: "{{ trigger.payload_json.action == 'off' }}"
@@ -103,15 +104,15 @@ action:
       - conditions: "{{ trigger.payload_json.action == 'off_double' }}"
         sequence: !input action_double_off
 
-      # 2. SCROLL SESSION START
+      # SCROLL SESSION START
       - conditions: "{{ trigger.payload_json.action == 'brightness_move_to_level' }}"
         sequence:
-          # A. Capture First Value
+          # Capture First Value
           - variables:
               first_val: >
                 {{ trigger.payload_json.brightness if trigger.payload_json.brightness is defined and trigger.payload_json.brightness != None else 255 }}
 
-          # B. Calibration Wait
+          # Calibration Wait
           - wait_for_trigger:
               - platform: mqtt
                 topic: "{{ topic_str }}"
@@ -119,29 +120,35 @@ action:
                 value_template: "{{ value_json.action }}"
             timeout: "00:00:00.5"
 
-          # C. Check Single Click
+          # Check Single Click
           - if:
               - condition: template
-                value_template: "{{ wait.trigger is none }}"
+                value_template: >
+                  {% set b = trigger.payload_json.brightness %}
+                  {{ wait.trigger is none and (b != None and b > 1) }}
             then:
-              - stop: "Single click detected. Ignored."
+              - stop: "Single click detected or unknown direction. Ignored."
 
-          # D. Calculate Initial Direction
+          # Calculate Initial Direction
           - variables:
-              raw_second: "{{ wait.trigger.payload_json.brightness }}"
+              raw_second: >
+                {{ wait.trigger.payload_json.brightness if wait.trigger is not none else none }}
+              
               direction: >
                 {% if raw_second is defined and raw_second != None %}
                   {% set sec = raw_second | int %}
                   {% if sec > first_val %} 1
                   {% elif sec < first_val %} -1
-                  {% else %} {{ -1 if sec <= 1 else 1 }} {% endif %}
+                  {% else %} 
+                    {{ -1 if sec <= 1 else 1 }} 
+                  {% endif %}
                 {% else %}
-                  1
+                  {{ -1 if first_val <= 1 else 1 }}
                 {% endif %}
               current_val: >
                 {{ raw_second | int if raw_second is defined and raw_second != None else 255 }}
 
-          # E. ENTER LOOP
+          # ENTER LOOP
           - repeat:
               sequence:
                 # 1. EXECUTE MOVE
@@ -184,21 +191,22 @@ action:
                           target: { entity_id: !input controlled_entity }
                           data: { temperature: "{{ state_attr(target_entity, 'temperature') | float(20) + (step * direction) }}" }
 
-                # 2. WAIT
+                # WAIT 
                 - wait_for_trigger:
                     - platform: mqtt
                       topic: "{{ topic_str }}"
+                      value_template: "{{ value_json.action is defined }}"
                   timeout: 
                     seconds: !input session_timeout
 
-                # 3. TIMEOUT CHECK
+                # TIMEOUT CHECK
                 - if:
                     - condition: template
                       value_template: "{{ wait.trigger is none }}"
                   then:
                     - stop: "Session ended."
 
-                # 4. BUTTON CHECK
+                # BUTTON CHECK
                 - if:
                     - condition: template
                       value_template: >
@@ -215,7 +223,7 @@ action:
                           sequence: !input action_double_off
                     - stop: "Loop interrupted by button click."
 
-                # 5. RECALCULATE
+                # RECALCULATE
                 - variables:
                     raw_new: "{{ wait.trigger.payload_json.brightness }}"
                     direction: >
