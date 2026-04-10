@@ -1,5 +1,5 @@
 blueprint:
-  name: Bilrea Scroll Controller V1.2
+  name: Bilrea Scroll Controller V1.3
   author: whag
   description: >
     Control Lights (Brightness, Temp, Color), Media, or Climate using the Bilrea Smart Scrollwheel remote.
@@ -17,6 +17,7 @@ blueprint:
       selector:
         entity:
           domain: [light, media_player, climate]
+          multiple: true
     control_mode:
       name: Control Mode
       description: "Select which attribute the rotation should adjust."
